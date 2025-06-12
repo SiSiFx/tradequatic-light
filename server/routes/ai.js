@@ -1,7 +1,15 @@
 import express from 'express';
+import OpenAI from 'openai';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
+
+const openaiApiKey = process.env.OPENAI_API_KEY;
+/** @type {import('openai').default | null} */
+let openai = null;
+if (openaiApiKey) {
+  openai = new OpenAI({ apiKey: openaiApiKey });
+}
 
 // Mock AI strategy generation
 router.post('/generate-strategy', async (req, res) => {
@@ -15,16 +23,51 @@ router.post('/generate-strategy', async (req, res) => {
       });
     }
     
-    // Simulate AI processing delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Mock AI response based on prompt keywords
+    // If OpenAI key provided, call real model
+    if (openai) {
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are a PineScript trading strategy generator. Given a user description, produce a PineScript v5 strategy with summary and list of parameters.'
+          },
+          {
+            role: 'user',
+            content: `Description: ${prompt}\nContext: ${JSON.stringify(context)}`
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 700
+      });
+
+      const raw = completion.choices[0]?.message?.content || '';
+      const strategyId = uuidv4();
+
+      // naive split
+      const [summary, ...codeParts] = raw.split('```');
+      const pineScript = codeParts.join('```');
+
+      const response = {
+        strategy: {
+          name: `AI Strategy ${strategyId.substring(0, 5)}`,
+          description: summary.trim(),
+          pineScript,
+          parameters: [],
+          explanation: summary.trim()
+        },
+        confidence: 85,
+        suggestions: ['Review parameters', 'Backtest before trading live']
+      };
+
+      return res.json({ success: true, data: response });
+    }
+
+    // Fallback to mock if no OpenAI key
+    await new Promise(resolve => setTimeout(resolve, 1500));
     const mockStrategy = generateMockStrategy(prompt, context);
-    
-    res.json({
-      success: true,
-      data: mockStrategy
-    });
+    return res.json({ success: true, data: mockStrategy });
   } catch (error) {
     console.error('AI generation error:', error);
     res.status(500).json({
